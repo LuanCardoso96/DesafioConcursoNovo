@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { signOut } from 'firebase/auth';
 import { auth } from '../services/firebase';
+import { useAuth } from '../context/AuthProvider';
 
 const { width } = Dimensions.get('window');
 const guidelineBaseWidth = 390; // base iPhone 14
@@ -67,10 +68,19 @@ const MATERIAS = [
 
 export default function HomeScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const [nomeUsuario, setNomeUsuario] = useState('Estudante');
+  const { userDoc } = useAuth();
+  const [nomeUsuario, setNomeUsuario] = useState('');
   const [showAlterarNome, setShowAlterarNome] = useState(false);
-  const [inputNome, setInputNome] = useState(nomeUsuario);
+  const [inputNome, setInputNome] = useState('');
   const [showMenu, setShowMenu] = useState(false);
+
+  // Atualizar nome do usuário quando userDoc mudar
+  useEffect(() => {
+    if (userDoc?.displayName) {
+      setNomeUsuario(userDoc.displayName);
+      setInputNome(userDoc.displayName);
+    }
+  }, [userDoc]);
 
   const handleMateriaPress = async (materia: string) => {
     try {

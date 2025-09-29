@@ -10,8 +10,6 @@ import {
   query,
   where,
   serverTimestamp,
-  doc,
-  setDoc,
   addDoc,
 } from 'firebase/firestore';
 
@@ -52,14 +50,6 @@ function toAltArray(alt: Flashcard['alternativas']) {
     .sort((a, b) => a.letra.localeCompare(b.letra));
 }
 
-function getUserId(): string {
-  let uid = (globalThis as any).__UID_CACHE__;
-  if (!uid) {
-    uid = 'user_' + Math.random().toString(36).slice(2, 11);
-    (globalThis as any).__UID_CACHE__ = uid;
-  }
-  return uid as string;
-}
 
 export default function QuestoesScreen() {
   const route = useRoute<QuestoesRoute>();
@@ -152,7 +142,10 @@ export default function QuestoesScreen() {
   const salvarResposta = useCallback(async (card: Flashcard, letra: string) => {
     try {
       const user = auth.currentUser;
-      if (!user) return;
+      if (!user) {
+        console.log('Usuário não autenticado');
+        return;
+      }
 
       const isCorrect = letra === card.correta;
       
@@ -167,20 +160,10 @@ export default function QuestoesScreen() {
         createdAt: serverTimestamp(),
       });
 
-      // Manter compatibilidade com sistema antigo
-      const uid = getUserId();
-      const docId = Math.abs(
-        Array.from(card.pergunta).reduce((h, c) => ((h * 32) - h) + c.charCodeAt(0), 0)
-      ).toString();
-      const ref = doc(db, 'respostasUsuarios', uid, materia || 'sem_materia', docId);
-      await setDoc(ref, {
-        pergunta: card.pergunta,
-        respostaSelecionada: letra,
-        correta: isCorrect,
-        timestamp: serverTimestamp(),
-      }, { merge: true });
+      console.log('Resposta salva com sucesso na coleção answers');
     } catch (error) {
       console.error('Erro ao salvar resposta:', error);
+      Alert.alert('Erro', 'Falha ao salvar resposta. Tente novamente.');
     }
   }, [materia]);
 

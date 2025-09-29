@@ -16,7 +16,7 @@ export default function SobreScreen() {
   const [copied, setCopied] = useState(false);
 
   const handleCopyEmail = () => {
-    const email = 'contato@passeconcurso.com';
+    const email = 'luancr72025@gmail.com';
     // Clipboard.setString(email);
     setCopied(true);
     Alert.alert('Sucesso', `Email: ${email}`);
@@ -24,7 +24,7 @@ export default function SobreScreen() {
   };
 
   const handleOpenWebsite = () => {
-    const url = 'https://passeconcurso.com';
+    const url = 'https://luancardosodev.com';
     Linking.openURL(url).catch(() => {
       Alert.alert('Erro', 'Não foi possível abrir o site');
     });
@@ -33,9 +33,9 @@ export default function SobreScreen() {
   const handleShare = async () => {
     try {
       await Share.share({
-        message: 'Baixe o PasseConcurso - O melhor app para estudar para concursos!',
-        url: 'https://passeconcurso.com',
-        title: 'PasseConcurso',
+        message: 'Baixe o DesafioConcurso - O melhor app para estudar para concursos!',
+        url: 'https://luancardosodev.com',
+        title: 'DesafioConcurso',
       });
     } catch (error) {
       console.error('Erro ao compartilhar:', error);
@@ -45,7 +45,7 @@ export default function SobreScreen() {
   const handleRateApp = () => {
     Alert.alert(
       'Avaliar App',
-      'Gostou do PasseConcurso? Deixe sua avaliação na loja!',
+      'Gostou do DesafioConcurso? Deixe sua avaliação na loja!',
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -67,7 +67,7 @@ export default function SobreScreen() {
           <View style={styles.logoContainer}>
             <Text style={styles.logoText}>PC</Text>
           </View>
-          <Text style={styles.appName}>PasseConcurso</Text>
+          <Text style={styles.appName}>DesafioConcurso</Text>
           <Text style={styles.version}>Versão 1.0.0</Text>
         </View>
 
@@ -75,7 +75,7 @@ export default function SobreScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Sobre o App</Text>
           <Text style={styles.description}>
-            O PasseConcurso é a plataforma definitiva para quem está se preparando 
+            O DesafioConcurso é a plataforma definitiva para quem está se preparando 
             para concursos públicos. Com questões atualizadas, estatísticas detalhadas 
             e uma comunidade ativa, você terá tudo que precisa para alcançar a aprovação.
           </Text>
@@ -142,14 +142,14 @@ export default function SobreScreen() {
             <Text style={styles.contactLabel}>Email:</Text>
             <Pressable style={styles.contactButton} onPress={handleCopyEmail}>
               <Text style={[styles.contactValue, copied && styles.contactValueCopied]}>
-                contato@passeconcurso.com
+                luancr72025@gmail.com
               </Text>
             </Pressable>
           </View>
           <View style={styles.contactItem}>
             <Text style={styles.contactLabel}>Website:</Text>
             <Pressable style={styles.contactButton} onPress={handleOpenWebsite}>
-              <Text style={styles.contactValue}>passeconcurso.com</Text>
+              <Text style={styles.contactValue}>luancardosodev.com</Text>
             </Pressable>
           </View>
         </View>
@@ -168,7 +168,7 @@ export default function SobreScreen() {
         {/* Footer */}
         <View style={styles.footer}>
           <Text style={styles.footerText}>
-            © 2024 PasseConcurso. Todos os direitos reservados.
+            © 2024 Luan cardoso desensolvimento. Todos os direitos reservados.
           </Text>
           <Text style={styles.footerText}>
             Desenvolvido com ❤️ para estudantes de concursos.

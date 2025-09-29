@@ -11,16 +11,16 @@ import {
   TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
+import { useAuth } from '../context/AuthProvider';
 import { auth, db } from '../services/firebase';
 import {
   collection,
   query,
   where,
   getDocs,
-  orderBy,
   doc,
   getDoc,
   updateDoc,
@@ -34,10 +34,17 @@ type UserProfile = {
   displayName: string;
   email: string;
   photoURL: string | null;
+  documento: string | null;
+  endereco: {
+    logradouro: string | null;
+    numero: string | null;
+    cidade: string | null;
+    estado: string | null;
+    cep: string | null;
+  };
   bio: string;
   createdAt: any;
-  lastLogin: any;
-  active: boolean;
+  updatedAt: any;
 };
 
 type AnswerStats = {
@@ -64,12 +71,21 @@ type Friendship = {
   id: string;
   users: string[];
   createdAt: any;
+  otherUser?: UserProfile;
 };
 
+type PerfilRoute = RouteProp<RootStackParamList, 'Perfil'>;
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 export default function PerfilScreen() {
   const navigation = useNavigation<NavigationProp>();
+  const route = useRoute<PerfilRoute>();
+  const { user, userDoc } = useAuth();
+  
+  // Determinar qual usuário mostrar
+  const targetUid = route.params?.uid || user?.uid;
+  const isOwnProfile = !route.params?.uid || route.params.uid === user?.uid;
+  
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [answerStats, setAnswerStats] = useState<AnswerStats>({
     total: 0,
@@ -85,122 +101,144 @@ export default function PerfilScreen() {
   const [updatingBio, setUpdatingBio] = useState(false);
   const [newBio, setNewBio] = useState('');
 
-  const user = auth.currentUser;
-
   // Carregar dados do perfil
   const carregarPerfil = useCallback(async () => {
-    if (!user) return;
+    if (!targetUid) return;
 
     try {
-      // Carregar perfil do usuário
-      const userDoc = await getDoc(doc(db, 'users', user.uid));
-      if (userDoc.exists()) {
-        const profileData = userDoc.data() as UserProfile;
-        setUserProfile(profileData);
-        setNewBio(profileData.bio || '');
+      // Se for o próprio perfil e temos userDoc, usar os dados do AuthProvider
+      if (isOwnProfile && userDoc) {
+        setUserProfile(userDoc as UserProfile);
+        setNewBio(userDoc.bio || '');
+      } else {
+        // Carregar perfil do usuário
+        const userDocSnapshot = await getDoc(doc(db, 'users', targetUid));
+        if (userDocSnapshot.exists()) {
+          const profileData = userDocSnapshot.data() as UserProfile;
+          setUserProfile(profileData);
+          if (isOwnProfile) {
+            setNewBio(profileData.bio || '');
+          }
+        }
       }
 
-      // Carregar estatísticas de respostas
-      const answersQuery = query(
-        collection(db, 'answers'),
-        where('uid', '==', user.uid),
-        orderBy('createdAt', 'desc')
-      );
-      const answersSnapshot = await getDocs(answersQuery);
-      
-      const stats: AnswerStats = {
-        total: 0,
-        correct: 0,
-        incorrect: 0,
-        percentage: 0,
-        byMateria: {},
-      };
-
-      answersSnapshot.forEach((doc) => {
-        const data = doc.data();
-        stats.total++;
-        if (data.correct) {
-          stats.correct++;
-        } else {
-          stats.incorrect++;
-        }
-
-        const materia = data.materia || 'Outros';
-        if (!stats.byMateria[materia]) {
-          stats.byMateria[materia] = { total: 0, correct: 0, percentage: 0 };
-        }
-        stats.byMateria[materia].total++;
-        if (data.correct) {
-          stats.byMateria[materia].correct++;
-        }
-      });
-
-      // Calcular percentuais
-      stats.percentage = stats.total > 0 ? Math.round((stats.correct / stats.total) * 100) : 0;
-      Object.keys(stats.byMateria).forEach(materia => {
-        const materiaStats = stats.byMateria[materia];
-        materiaStats.percentage = materiaStats.total > 0 
-          ? Math.round((materiaStats.correct / materiaStats.total) * 100) 
-          : 0;
-      });
-
-      setAnswerStats(stats);
-
-      // Carregar solicitações de amizade recebidas
-      const friendRequestsQuery = query(
-        collection(db, 'friendRequests'),
-        where('toUid', '==', user.uid),
-        where('status', '==', 'pending'),
-        orderBy('createdAt', 'desc')
-      );
-      const friendRequestsSnapshot = await getDocs(friendRequestsQuery);
-      
-      const requests: FriendRequest[] = [];
-      for (const docSnapshot of friendRequestsSnapshot.docs) {
-        const data = docSnapshot.data() as Omit<FriendRequest, 'id'>;
-        const request: FriendRequest = {
-          id: docSnapshot.id,
-          ...data,
+        // Carregar estatísticas de respostas apenas para o próprio perfil
+        if (isOwnProfile) {
+          // Query simples sem orderBy para evitar problema de índice
+          const answersQuery = query(
+            collection(db, 'answers'),
+            where('uid', '==', targetUid)
+          );
+          const answersSnapshot = await getDocs(answersQuery);
+        
+        const stats: AnswerStats = {
+          total: 0,
+          correct: 0,
+          incorrect: 0,
+          percentage: 0,
+          byMateria: {},
         };
 
-        // Buscar dados do usuário que enviou
-        try {
-          const fromUserDoc = await getDoc(doc(db, 'users', request.fromUid));
-          if (fromUserDoc.exists()) {
-            request.fromUser = fromUserDoc.data() as FriendRequest['fromUser'];
+        answersSnapshot.forEach((docSnapshot) => {
+          const data = docSnapshot.data();
+          stats.total++;
+          if (data.correct) {
+            stats.correct++;
+          } else {
+            stats.incorrect++;
           }
-        } catch (error) {
-          console.error('Erro ao buscar usuário:', error);
-        }
 
-        requests.push(request);
-      }
-      setFriendRequests(requests);
-
-      // Carregar amizades
-      const friendshipsQuery = query(
-        collection(db, 'friendships'),
-        where('users', 'array-contains', user.uid)
-      );
-      const friendshipsSnapshot = await getDocs(friendshipsQuery);
-      
-      const friends: Friendship[] = [];
-      friendshipsSnapshot.forEach((doc) => {
-        const data = doc.data() as Omit<Friendship, 'id'>;
-        friends.push({
-          id: doc.id,
-          ...data,
+          const materia = data.materia || 'Outros';
+          if (!stats.byMateria[materia]) {
+            stats.byMateria[materia] = { total: 0, correct: 0, percentage: 0 };
+          }
+          stats.byMateria[materia].total++;
+          if (data.correct) {
+            stats.byMateria[materia].correct++;
+          }
         });
-      });
-      setFriendships(friends);
+
+        // Calcular percentuais
+        stats.percentage = stats.total > 0 ? Math.round((stats.correct / stats.total) * 100) : 0;
+        Object.keys(stats.byMateria).forEach(materia => {
+          const materiaStats = stats.byMateria[materia];
+          materiaStats.percentage = materiaStats.total > 0 
+            ? Math.round((materiaStats.correct / materiaStats.total) * 100) 
+            : 0;
+        });
+
+        setAnswerStats(stats);
+
+        // Carregar solicitações de amizade recebidas apenas para o próprio perfil
+        const friendRequestsQuery = query(
+          collection(db, 'friendRequests'),
+          where('toUid', '==', targetUid),
+          where('status', '==', 'pending')
+        );
+        const friendRequestsSnapshot = await getDocs(friendRequestsQuery);
+        
+        const requests: FriendRequest[] = [];
+        for (const docSnapshot of friendRequestsSnapshot.docs) {
+          const data = docSnapshot.data() as Omit<FriendRequest, 'id'>;
+          const request: FriendRequest = {
+            id: docSnapshot.id,
+            ...data,
+          };
+
+          // Buscar dados do usuário que enviou
+          try {
+            const fromUserDocSnapshot = await getDoc(doc(db, 'users', request.fromUid));
+            if (fromUserDocSnapshot.exists()) {
+              request.fromUser = fromUserDocSnapshot.data() as FriendRequest['fromUser'];
+            }
+          } catch (error) {
+            console.error('Erro ao buscar usuário:', error);
+          }
+
+          requests.push(request);
+        }
+        setFriendRequests(requests);
+
+        // Carregar amizades apenas para o próprio perfil
+        const friendshipsQuery = query(
+          collection(db, 'friendships'),
+          where('users', 'array-contains', targetUid)
+        );
+        const friendshipsSnapshot = await getDocs(friendshipsQuery);
+        
+        const friends: Friendship[] = [];
+        for (const docSnapshot of friendshipsSnapshot.docs) {
+          const data = docSnapshot.data() as Omit<Friendship, 'id'>;
+          const friendship: Friendship = {
+            id: docSnapshot.id,
+            ...data,
+          };
+          
+          // Buscar dados do outro usuário
+          const otherUid = friendship.users.find((uid) => uid !== targetUid);
+          if (otherUid) {
+            try {
+              const otherUserDocSnapshot = await getDoc(doc(db, 'users', otherUid));
+              if (otherUserDocSnapshot.exists()) {
+                friendship.otherUser = otherUserDocSnapshot.data() as UserProfile;
+              }
+            } catch (error) {
+              console.error('Erro ao buscar outro usuário:', error);
+            }
+          }
+          
+          friends.push(friendship);
+        }
+        setFriendships(friends);
+      }
 
     } catch (error) {
       console.error('Erro ao carregar perfil:', error);
       Alert.alert('Erro', 'Falha ao carregar dados do perfil');
-    } finally {
-      setLoading(false);
-    }
-  }, [user]);
+      } finally {
+        setLoading(false);
+      }
+  }, [targetUid, isOwnProfile, userDoc]);
 
   useEffect(() => {
     carregarPerfil();
@@ -208,7 +246,7 @@ export default function PerfilScreen() {
 
   // Atualizar bio
   const atualizarBio = async () => {
-    if (!user || !newBio.trim()) return;
+    if (!user || !newBio.trim() || !isOwnProfile) return;
 
     setUpdatingBio(true);
     try {
@@ -218,9 +256,19 @@ export default function PerfilScreen() {
       
       setUserProfile(prev => prev ? { ...prev, bio: newBio.trim() } : null);
       Alert.alert('Sucesso', 'Bio atualizada!');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao atualizar bio:', error);
-      Alert.alert('Erro', 'Falha ao atualizar bio');
+      
+      // Tratamento específico de erros das regras do Firestore
+      if (error.code === 'permission-denied') {
+        Alert.alert('Erro', 'Sem permissão para atualizar bio. Verifique se está logado.');
+      } else if (error.code === 'failed-precondition') {
+        Alert.alert('Erro', 'Dados inválidos. Verifique o conteúdo da bio.');
+      } else if (error.code === 'unavailable') {
+        Alert.alert('Erro', 'Serviço temporariamente indisponível. Tente novamente.');
+      } else {
+        Alert.alert('Erro', `Falha ao atualizar bio: ${error.message || 'Erro desconhecido'}`);
+      }
     } finally {
       setUpdatingBio(false);
     }
@@ -253,9 +301,19 @@ export default function PerfilScreen() {
       // Recarregar dados
       carregarPerfil();
       Alert.alert('Sucesso', 'Solicitação aceita!');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao aceitar amizade:', error);
-      Alert.alert('Erro', 'Falha ao aceitar solicitação');
+      
+      // Tratamento específico de erros das regras do Firestore
+      if (error.code === 'permission-denied') {
+        Alert.alert('Erro', 'Sem permissão para aceitar amizade. Verifique se está logado.');
+      } else if (error.code === 'failed-precondition') {
+        Alert.alert('Erro', 'Dados inválidos. Verifique a solicitação de amizade.');
+      } else if (error.code === 'unavailable') {
+        Alert.alert('Erro', 'Serviço temporariamente indisponível. Tente novamente.');
+      } else {
+        Alert.alert('Erro', `Falha ao aceitar solicitação: ${error.message || 'Erro desconhecido'}`);
+      }
     }
   };
 
@@ -268,10 +326,66 @@ export default function PerfilScreen() {
 
       carregarPerfil();
       Alert.alert('Sucesso', 'Solicitação rejeitada');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao rejeitar amizade:', error);
-      Alert.alert('Erro', 'Falha ao rejeitar solicitação');
+      
+      // Tratamento específico de erros das regras do Firestore
+      if (error.code === 'permission-denied') {
+        Alert.alert('Erro', 'Sem permissão para rejeitar amizade. Verifique se está logado.');
+      } else if (error.code === 'failed-precondition') {
+        Alert.alert('Erro', 'Dados inválidos. Verifique a solicitação de amizade.');
+      } else if (error.code === 'unavailable') {
+        Alert.alert('Erro', 'Serviço temporariamente indisponível. Tente novamente.');
+      } else {
+        Alert.alert('Erro', `Falha ao rejeitar solicitação: ${error.message || 'Erro desconhecido'}`);
+      }
     }
+  };
+
+  // Enviar solicitação de amizade
+  const enviarSolicitacaoAmizade = async (toUid: string) => {
+    if (!user) return;
+
+    try {
+      await addDoc(collection(db, 'friendRequests'), {
+        fromUid: user.uid,
+        toUid: toUid,
+        status: 'pending',
+        createdAt: serverTimestamp(),
+      });
+
+      Alert.alert('Sucesso', 'Solicitação de amizade enviada!');
+    } catch (error: any) {
+      console.error('Erro ao enviar solicitação:', error);
+      Alert.alert('Erro', 'Falha ao enviar solicitação de amizade');
+    }
+  };
+
+  // Remover amizade
+  const removerAmizade = async (friendshipId: string) => {
+    Alert.alert(
+      'Remover Amigo',
+      'Tem certeza que deseja remover este amigo?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Remover',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await updateDoc(doc(db, 'friendships', friendshipId), {
+                users: [],
+              });
+              carregarPerfil();
+              Alert.alert('Sucesso', 'Amigo removido');
+            } catch (error) {
+              console.error('Erro ao remover amizade:', error);
+              Alert.alert('Erro', 'Falha ao remover amizade');
+            }
+          },
+        },
+      ]
+    );
   };
 
   // Logout
@@ -339,84 +453,96 @@ export default function PerfilScreen() {
             {userProfile?.displayName || 'Usuário'}
           </Text>
           <Text style={styles.email}>{userProfile?.email || ''}</Text>
-          <Text style={styles.memberSince}>
+              <Text style={styles.memberSince}>
             Membro desde {formatarData(userProfile?.createdAt)}
-          </Text>
+              </Text>
         </View>
 
         {/* Bio */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Bio</Text>
-          <View style={styles.bioContainer}>
-            <TextInput
-              style={styles.bioInput}
-              placeholder="Escreva algo sobre você..."
-              value={newBio}
-              onChangeText={setNewBio}
-              multiline
-              maxLength={200}
-            />
-            <Pressable
-              style={[styles.updateBioButton, updatingBio && styles.updateBioButtonDisabled]}
-              onPress={atualizarBio}
-              disabled={updatingBio}
-            >
-              <Text style={styles.updateBioButtonText}>
-                {updatingBio ? 'Salvando...' : 'Atualizar'}
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-
-        {/* Estatísticas */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Estatísticas de Estudo</Text>
-          
-          <View style={styles.statsGrid}>
-            <View style={styles.statCard}>
-              <Text style={styles.statNumber}>{answerStats.total}</Text>
-              <Text style={styles.statLabel}>Total</Text>
-            </View>
-            <View style={styles.statCard}>
-            <Text style={[styles.statNumber, styles.statCorrect]}>
-              {answerStats.correct}
-            </Text>
-              <Text style={styles.statLabel}>Acertos</Text>
-            </View>
-            <View style={styles.statCard}>
-              <Text style={[styles.statNumber, styles.statIncorrect]}>
-                {answerStats.incorrect}
-              </Text>
-              <Text style={styles.statLabel}>Erros</Text>
-            </View>
-            <View style={styles.statCard}>
-              <Text style={[styles.statNumber, styles.statPercentage]}>
-                {answerStats.percentage}%
-              </Text>
-              <Text style={styles.statLabel}>Taxa</Text>
-            </View>
-          </View>
-
-          {/* Estatísticas por matéria */}
-          {Object.keys(answerStats.byMateria).length > 0 && (
-            <View style={styles.materiaStats}>
-              <Text style={styles.materiaStatsTitle}>Por Matéria</Text>
-              {Object.entries(answerStats.byMateria).map(([materia, stats]) => (
-                <View key={materia} style={styles.materiaStatRow}>
-                  <Text style={styles.materiaName}>{materia}</Text>
-                  <View style={styles.materiaStatDetails}>
-                    <Text style={styles.materiaStatText}>
-                      {stats.correct}/{stats.total} ({stats.percentage}%)
-                    </Text>
-                  </View>
-                </View>
-              ))}
+        {isOwnProfile && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Bio</Text>
+            <View style={styles.bioContainer}>
+              <TextInput
+                style={styles.bioInput}
+                placeholder="Escreva algo sobre você..."
+                value={newBio}
+                onChangeText={setNewBio}
+                multiline
+                maxLength={200}
+              />
+              <Pressable
+                style={[styles.updateBioButton, updatingBio && styles.updateBioButtonDisabled]}
+                onPress={atualizarBio}
+                disabled={updatingBio}
+              >
+                <Text style={styles.updateBioButtonText}>
+                  {updatingBio ? 'Salvando...' : 'Atualizar'}
+                  </Text>
+              </Pressable>
+              </View>
             </View>
           )}
-        </View>
 
-        {/* Solicitações de amizade */}
-        {friendRequests.length > 0 && (
+        {/* Bio do usuário (apenas leitura) */}
+        {!isOwnProfile && userProfile?.bio && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Sobre</Text>
+            <Text style={styles.bioText}>{userProfile.bio}</Text>
+          </View>
+        )}
+
+        {/* Estatísticas - apenas para o próprio perfil */}
+        {isOwnProfile && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Estatísticas de Estudo</Text>
+            
+            <View style={styles.statsGrid}>
+              <View style={styles.statCard}>
+                <Text style={styles.statNumber}>{answerStats.total}</Text>
+                <Text style={styles.statLabel}>Total</Text>
+            </View>
+              <View style={styles.statCard}>
+                <Text style={[styles.statNumber, styles.statCorrect]}>
+                  {answerStats.correct}
+                </Text>
+                <Text style={styles.statLabel}>Acertos</Text>
+            </View>
+              <View style={styles.statCard}>
+                <Text style={[styles.statNumber, styles.statIncorrect]}>
+                  {answerStats.incorrect}
+                </Text>
+                <Text style={styles.statLabel}>Erros</Text>
+            </View>
+              <View style={styles.statCard}>
+                <Text style={[styles.statNumber, styles.statPercentage]}>
+                  {answerStats.percentage}%
+                </Text>
+                <Text style={styles.statLabel}>Taxa</Text>
+            </View>
+          </View>
+
+            {/* Estatísticas por matéria */}
+            {Object.keys(answerStats.byMateria).length > 0 && (
+              <View style={styles.materiaStats}>
+                <Text style={styles.materiaStatsTitle}>Por Matéria</Text>
+                {Object.entries(answerStats.byMateria).map(([materia, stats]) => (
+                  <View key={materia} style={styles.materiaStatRow}>
+                    <Text style={styles.materiaName}>{materia}</Text>
+                    <View style={styles.materiaStatDetails}>
+                      <Text style={styles.materiaStatText}>
+                        {stats.correct}/{stats.total} ({stats.percentage}%)
+            </Text>
+          </View>
+        </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Solicitações de amizade - apenas para o próprio perfil */}
+        {isOwnProfile && friendRequests.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>
               Solicitações de Amizade ({friendRequests.length})
@@ -425,7 +551,7 @@ export default function PerfilScreen() {
               <View key={request.id} style={styles.friendRequestCard}>
                 <View style={styles.friendRequestInfo}>
                   <Text style={styles.friendRequestName}>
-                    {request.fromUser?.displayName || 'Usuário'}
+                    {request.fromUser?.displayName || 'Anônimo'}
                   </Text>
                   <Text style={styles.friendRequestEmail}>
                     {request.fromUser?.email || ''}
@@ -450,36 +576,67 @@ export default function PerfilScreen() {
           </View>
         )}
 
-        {/* Amigos */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
-            Amigos ({friendships.length})
-          </Text>
-          {friendships.length === 0 ? (
-            <Text style={styles.emptyText}>
-              Você ainda não tem amigos. Use o fórum para conhecer pessoas!
+        {/* Amigos - apenas para o próprio perfil */}
+        {isOwnProfile && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>
+              Amigos ({friendships.length})
             </Text>
-          ) : (
-            <Text style={styles.emptyText}>
-              {friendships.length} amigo(s) conectado(s)
-            </Text>
+            {friendships.length === 0 ? (
+              <Text style={styles.emptyText}>
+                Você ainda não tem amigos. Use o fórum para conhecer pessoas!
+              </Text>
+            ) : (
+              friendships.map((friendship) => (
+                <View key={friendship.id} style={styles.friendCard}>
+                  <View style={styles.friendInfo}>
+                    <Text style={styles.friendName}>
+                      {friendship.otherUser?.displayName || 'Anônimo'}
+                    </Text>
+                    <Text style={styles.friendEmail}>
+                      {friendship.otherUser?.email || ''}
+                </Text>
+                  </View>
+                  <Pressable
+                    style={styles.removeButton}
+                    onPress={() => removerAmizade(friendship.id)}
+                  >
+                    <Text style={styles.removeButtonText}>Remover</Text>
+                  </Pressable>
+              </View>
+            ))
           )}
         </View>
+        )}
 
-        {/* Ações */}
-        <View style={styles.actionsSection}>
-          <Pressable style={styles.actionButton} onPress={() => navigation.navigate('Forum')}>
-            <Text style={styles.actionButtonText}>Ir para o Fórum</Text>
-          </Pressable>
-          
-          <Pressable style={styles.actionButton} onPress={() => navigation.navigate('Sobre')}>
-            <Text style={styles.actionButtonText}>Sobre o App</Text>
-          </Pressable>
-          
-          <Pressable style={[styles.actionButton, styles.logoutButton]} onPress={handleLogout}>
-            <Text style={[styles.actionButtonText, styles.logoutButtonText]}>Sair</Text>
-          </Pressable>
-        </View>
+        {/* Botão para adicionar amigo - apenas para outros usuários */}
+        {!isOwnProfile && user && targetUid && (
+          <View style={styles.section}>
+            <Pressable
+              style={styles.addFriendButton}
+              onPress={() => enviarSolicitacaoAmizade(targetUid)}
+            >
+              <Text style={styles.addFriendButtonText}>Adicionar Amigo</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {/* Ações - apenas para o próprio perfil */}
+        {isOwnProfile && (
+          <View style={styles.actionsSection}>
+            <Pressable style={styles.actionButton} onPress={() => navigation.navigate('Forum')}>
+              <Text style={styles.actionButtonText}>Ir para o Fórum</Text>
+            </Pressable>
+            
+            <Pressable style={styles.actionButton} onPress={() => navigation.navigate('Sobre')}>
+              <Text style={styles.actionButtonText}>Sobre o App</Text>
+            </Pressable>
+            
+            <Pressable style={[styles.actionButton, styles.logoutButton]} onPress={handleLogout}>
+              <Text style={[styles.actionButtonText, styles.logoutButtonText]}>Sair</Text>
+            </Pressable>
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -711,5 +868,57 @@ const styles = StyleSheet.create({
   },
   logoutButtonText: {
     color: '#e74c3c',
+  },
+  bioText: {
+    color: '#fff',
+    fontSize: 16,
+    lineHeight: 24,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    padding: 12,
+    borderRadius: 8,
+  },
+  addFriendButton: {
+    backgroundColor: '#3498db',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  addFriendButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  friendCard: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+  },
+  friendInfo: {
+    flex: 1,
+  },
+  friendName: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  friendEmail: {
+    color: '#999',
+    fontSize: 14,
+  },
+  removeButton: {
+    backgroundColor: '#e74c3c',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  removeButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
   },
 });

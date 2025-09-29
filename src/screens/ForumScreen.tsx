@@ -11,7 +11,11 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { auth, db } from '../services/firebase';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../navigation/AppNavigator';
+import { useAuth } from '../context/AuthProvider';
+import { db } from '../services/firebase';
 import {
   collection,
   addDoc,
@@ -25,10 +29,13 @@ import {
   getDocs,
 } from 'firebase/firestore';
 
+type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
+
 type Post = {
   id: string;
   uid: string;
   content: string;
+  materia?: string;
   createdAt: any;
   user?: {
     displayName: string;
@@ -58,16 +65,48 @@ const filtrarConteudo = (texto: string): string => {
   return resultado;
 };
 
+const MATERIAS = [
+  'Conhecimentos Gerais',
+  'Atualidades',
+  'Português',
+  'Matemática',
+  'Raciocínio Lógico',
+  'Informática',
+  'Direito Constitucional',
+  'Direito Administrativo',
+  'Contabilidade',
+  'Inglês',
+];
+
 export default function ForumScreen() {
+  const navigation = useNavigation<NavigationProp>();
+  const { user, userDoc } = useAuth();
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [newPost, setNewPost] = useState('');
+  const [selectedMateria, setSelectedMateria] = useState('');
   const [posting, setPosting] = useState(false);
   const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set());
   const [comments, setComments] = useState<Record<string, Comment[]>>({});
   const [newComments, setNewComments] = useState<Record<string, string>>({});
   const [commenting, setCommenting] = useState<Record<string, boolean>>({});
+
+  // Verificar se usuário tem perfil completo
+  useEffect(() => {
+    if (userDoc && !userDoc.displayName) {
+      Alert.alert(
+        'Perfil Incompleto',
+        'Complete seu perfil antes de publicar no fórum.',
+        [
+          {
+            text: 'Completar Perfil',
+            onPress: () => navigation.navigate('Perfil'),
+          },
+        ]
+      );
+    }
+  }, [userDoc, navigation]);
 
   // Carregar posts em tempo real
   useEffect(() => {
@@ -89,9 +128,9 @@ export default function ForumScreen() {
 
         // Buscar dados do usuário
         try {
-          const userDoc = await getDoc(doc(db, 'users', post.uid));
-          if (userDoc.exists()) {
-            post.user = userDoc.data() as Post['user'];
+          const userDocSnapshot = await getDoc(doc(db, 'users', post.uid));
+          if (userDocSnapshot.exists()) {
+            post.user = userDocSnapshot.data() as Post['user'];
           }
         } catch (error) {
           console.error('Erro ao buscar usuário:', error);
@@ -127,9 +166,9 @@ export default function ForumScreen() {
 
         // Buscar dados do usuário
         try {
-          const userDoc = await getDoc(doc(db, 'users', comment.uid));
-          if (userDoc.exists()) {
-            comment.user = userDoc.data() as Comment['user'];
+          const userDocSnapshot = await getDoc(doc(db, 'users', comment.uid));
+          if (userDocSnapshot.exists()) {
+            comment.user = userDocSnapshot.data() as Comment['user'];
           }
         } catch (error) {
           console.error('Erro ao buscar usuário:', error);
@@ -159,9 +198,18 @@ export default function ForumScreen() {
       return;
     }
 
-    const user = auth.currentUser;
+    if (!selectedMateria) {
+      Alert.alert('Erro', 'Selecione uma matéria');
+      return;
+    }
+
     if (!user) {
       Alert.alert('Erro', 'Usuário não autenticado');
+      return;
+    }
+
+    if (!userDoc?.displayName) {
+      Alert.alert('Erro', 'Complete seu perfil antes de publicar');
       return;
     }
 
@@ -172,14 +220,26 @@ export default function ForumScreen() {
       await addDoc(collection(db, 'forumPosts'), {
         uid: user.uid,
         content: conteudoFiltrado,
+        materia: selectedMateria,
         createdAt: serverTimestamp(),
       });
 
       setNewPost('');
+      setSelectedMateria('');
       Alert.alert('Sucesso', 'Post publicado!');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao publicar post:', error);
-      Alert.alert('Erro', 'Falha ao publicar post');
+      
+      // Tratamento específico de erros das regras do Firestore
+      if (error.code === 'permission-denied') {
+        Alert.alert('Erro', 'Sem permissão para publicar. Verifique se está logado.');
+      } else if (error.code === 'failed-precondition') {
+        Alert.alert('Erro', 'Dados inválidos. Verifique o conteúdo do post.');
+      } else if (error.code === 'unavailable') {
+        Alert.alert('Erro', 'Serviço temporariamente indisponível. Tente novamente.');
+      } else {
+        Alert.alert('Erro', `Falha ao publicar post: ${error.message || 'Erro desconhecido'}`);
+      }
     } finally {
       setPosting(false);
     }
@@ -198,7 +258,6 @@ export default function ForumScreen() {
       return;
     }
 
-    const user = auth.currentUser;
     if (!user) {
       Alert.alert('Erro', 'Usuário não autenticado');
       return;
@@ -216,9 +275,19 @@ export default function ForumScreen() {
 
       setNewComments(prev => ({ ...prev, [postId]: '' }));
       Alert.alert('Sucesso', 'Comentário publicado!');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao comentar:', error);
-      Alert.alert('Erro', 'Falha ao publicar comentário');
+      
+      // Tratamento específico de erros das regras do Firestore
+      if (error.code === 'permission-denied') {
+        Alert.alert('Erro', 'Sem permissão para comentar. Verifique se está logado.');
+      } else if (error.code === 'failed-precondition') {
+        Alert.alert('Erro', 'Dados inválidos. Verifique o conteúdo do comentário.');
+      } else if (error.code === 'unavailable') {
+        Alert.alert('Erro', 'Serviço temporariamente indisponível. Tente novamente.');
+      } else {
+        Alert.alert('Erro', `Falha ao publicar comentário: ${error.message || 'Erro desconhecido'}`);
+      }
     } finally {
       setCommenting(prev => ({ ...prev, [postId]: false }));
     }
@@ -239,6 +308,11 @@ export default function ForumScreen() {
         carregarComentarios(postId);
       }
     }
+  };
+
+  // Navegar para perfil do autor
+  const goToProfile = (uid: string) => {
+    navigation.navigate('Perfil', { uid });
   };
 
   // Refresh
@@ -277,6 +351,10 @@ export default function ForumScreen() {
       
       {/* Input para novo post */}
       <View style={styles.newPostContainer}>
+        <Text style={styles.userInfo}>
+          {userDoc?.displayName || 'Usuário'} - {userDoc?.email || ''}
+        </Text>
+        
         <TextInput
           style={styles.newPostInput}
           placeholder="O que você está pensando?"
@@ -285,12 +363,36 @@ export default function ForumScreen() {
           multiline
           maxLength={500}
         />
+        
+        <View style={styles.materiaContainer}>
+          <Text style={styles.materiaLabel}>Matéria:</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            {MATERIAS.map((materia) => (
+              <Pressable
+                key={materia}
+                style={[
+                  styles.materiaButton,
+                  selectedMateria === materia && styles.materiaButtonSelected
+                ]}
+                onPress={() => setSelectedMateria(materia)}
+              >
+                <Text style={[
+                  styles.materiaButtonText,
+                  selectedMateria === materia && styles.materiaButtonTextSelected
+                ]}>
+                  {materia}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+        
         <View style={styles.newPostActions}>
           <Text style={styles.charCount}>{newPost.length}/500</Text>
           <Pressable
             style={[styles.postButton, posting && styles.postButtonDisabled]}
             onPress={publicarPost}
-            disabled={posting || !newPost.trim()}
+            disabled={posting || !newPost.trim() || !selectedMateria}
           >
             <Text style={styles.postButtonText}>
               {posting ? 'Publicando...' : 'Publicar'}
@@ -309,12 +411,17 @@ export default function ForumScreen() {
         {posts.map((post) => (
           <View key={post.id} style={styles.postCard}>
             <View style={styles.postHeader}>
-              <Text style={styles.postAuthor}>
-                {post.user?.displayName || 'Usuário'}
-              </Text>
-              <Text style={styles.postTime}>
-                {formatarData(post.createdAt)}
-              </Text>
+              <Pressable onPress={() => goToProfile(post.uid)}>
+                <Text style={styles.postAuthor}>
+                  {post.user?.displayName || 'Anônimo'}
+                </Text>
+              </Pressable>
+              <View style={styles.postMeta}>
+                <Text style={styles.postMateria}>{post.materia}</Text>
+                <Text style={styles.postTime}>
+                  {formatarData(post.createdAt)}
+                </Text>
+              </View>
             </View>
             
             <Text style={styles.postContent}>{post.content}</Text>
@@ -335,9 +442,11 @@ export default function ForumScreen() {
                 {comments[post.id]?.map((comment) => (
                   <View key={comment.id} style={styles.commentCard}>
                     <View style={styles.commentHeader}>
-                      <Text style={styles.commentAuthor}>
-                        {comment.user?.displayName || 'Usuário'}
-                      </Text>
+                      <Pressable onPress={() => goToProfile(comment.uid)}>
+                        <Text style={styles.commentAuthor}>
+                          {comment.user?.displayName || 'Anônimo'}
+                        </Text>
+                      </Pressable>
                       <Text style={styles.commentTime}>
                         {formatarData(comment.createdAt)}
                       </Text>
@@ -414,6 +523,12 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 16,
   },
+  userInfo: {
+    color: '#3498db',
+    fontSize: 14,
+    marginBottom: 12,
+    fontWeight: '600',
+  },
   newPostInput: {
     backgroundColor: 'rgba(255,255,255,0.1)',
     borderRadius: 8,
@@ -422,12 +537,43 @@ const styles = StyleSheet.create({
     fontSize: 16,
     minHeight: 80,
     textAlignVertical: 'top',
+    marginBottom: 12,
+  },
+  materiaContainer: {
+    marginBottom: 12,
+  },
+  materiaLabel: {
+    color: '#fff',
+    fontSize: 14,
+    marginBottom: 8,
+    fontWeight: '600',
+  },
+  materiaButton: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  materiaButtonSelected: {
+    backgroundColor: '#3498db',
+    borderColor: '#3498db',
+  },
+  materiaButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  materiaButtonTextSelected: {
+    color: '#fff',
+    fontWeight: '600',
   },
   newPostActions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 12,
   },
   charCount: {
     color: '#999',
@@ -458,13 +604,27 @@ const styles = StyleSheet.create({
   postHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 12,
   },
   postAuthor: {
     color: '#3498db',
     fontWeight: '600',
     fontSize: 16,
+    flex: 1,
+  },
+  postMeta: {
+    alignItems: 'flex-end',
+  },
+  postMateria: {
+    color: '#2ecc71',
+    fontSize: 12,
+    fontWeight: '500',
+    backgroundColor: 'rgba(46, 204, 113, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+    marginBottom: 4,
   },
   postTime: {
     color: '#999',
